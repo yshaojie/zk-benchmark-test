@@ -55,11 +55,11 @@ public class ZKConnBenchmark {
                 connections.add(curatorFrameworkConn);
             }
             if (i%500==0) {
-                long end = System.currentTimeMillis();
-                System.out.println("connections count="+i+" cost time="+(end-start));
-                start = System.currentTimeMillis();
+                System.out.println("connections count="+i);
             }
         }
+        long end = System.currentTimeMillis();
+        System.out.println("connections test count="+count+" cost time ="+(end-start)+" average time="+((end-start)/count));
     }
 
     private byte[] createData(int length){
@@ -87,20 +87,22 @@ public class ZKConnBenchmark {
         String data = System.currentTimeMillis()+new String(createData(dataLen));
         connections.get(0).setData().forPath(path, data.getBytes());
         Thread.sleep(sleepms);
-        System.out.println("get wath in " + sleepms + "ms count=" + tims.size());
         List<Long> ss = new ArrayList<Long>(tims.size());
+        long all = 0;
         for (Long s : tims) {
+            all = all + s;
             ss.add(s);
         }
-
-        Collections.sort(ss, new Comparator<Long>() {
-            public int compare(Long o1, Long o2) {
-                return (int) (o2.longValue() - o1.longValue());
-            }
-        });
-        for (Long tim : ss) {
-            System.out.println(tim);
-        }
+        System.out.println("get wath in " + sleepms + "ms count=" + tims.size()+"  average time="+(all/tims.size()));
+        System.out.println("wath test end.............");
+//        Collections.sort(ss, new Comparator<Long>() {
+//            public int compare(Long o1, Long o2) {
+//                return (int) (o2.longValue() - o1.longValue());
+//            }
+//        });
+//        for (Long tim : ss) {
+//            System.out.println(tim);
+//        }
 
     }
 
@@ -116,13 +118,11 @@ public class ZKConnBenchmark {
                             long current = System.currentTimeMillis();
                             final byte[] bytes;
                             try {
-//                                bytes = connection.getData().forPath(watchedEvent.getPath());
-//                                long setTime = Long.valueOf(new String(bytes).substring(0,13)) ;
-//                                final long ts = current - setTime;
-                                long ts = 0;
+                                bytes = connection.getData().forPath(watchedEvent.getPath());
+                                long setTime = Long.valueOf(new String(bytes).substring(0,13)) ;
+                                final long ts = current - setTime;
+//                                long ts = 0;
                                 tims.add(ts);
-                                final int currentCount = counter.incrementAndGet();
-                                System.out.println("current="+currentCount+"  ts="+ts);
                             } catch (Exception e) {
                                 e.printStackTrace();
                             }
@@ -144,8 +144,9 @@ public class ZKConnBenchmark {
         long start = System.currentTimeMillis();
         long min = 10000;
         long max = 0;
+        long all = 0;
         for (CuratorFramework connection : connections) {
-            for (int i = 1; i < nodeCount; i++) {
+            for (int i = 1; i <= nodeCount; i++) {
                 //随机节点
                 String path = "/node"+i;
                 try {
@@ -153,6 +154,7 @@ public class ZKConnBenchmark {
                     final Stat stat = connection.setData().forPath(path, data);
                     long s2=System.currentTimeMillis();
                     long ts = s2-s1;
+                    all = all + ts;
                     if (min>ts) {
                         min = ts;
                     }
@@ -168,17 +170,21 @@ public class ZKConnBenchmark {
         }
 
         long end = System.currentTimeMillis();
-        System.out.println("set data cost min="+min+" max="+max+" average time="+((end-start))/(connections.size()*nodeCount));
+        System.out.println("set data cost min="+min+" max="+max+" average time="+((all))/(connections.size()*nodeCount));
         start = System.currentTimeMillis();
-        min = 0;
+        min = 100000;
         max = 0;
+        all = 0;
         for (CuratorFramework connection : connections) {
-            System.out.println("proccess connection="+connection);
-            for (String node : nodes) {
+            for (int i = 1; i <= nodeCount; i++) {
+                //随机节点
+                String path = "/node"+i;
                 long s1=System.currentTimeMillis();
-                connection.getData().forPath(node);
+                final byte[] bytes = connection.getData().forPath(path);
+                System.out.println(new String(bytes).length());
                 long s2=System.currentTimeMillis();
                 long ts = s2-s1;
+                all = all + ts;
                 if (min>ts) {
                     min = ts;
                 }
@@ -188,7 +194,7 @@ public class ZKConnBenchmark {
             }
         }
         end = System.currentTimeMillis();
-        System.out.println("get data cost min="+min+" max="+max+" average time="+((end-start))/(connections.size()*nodeCount));
+        System.out.println("get data cost min="+min+" max="+max+" average time="+((all))/(connections.size()*nodeCount));
         System.out.println("set data success");
     }
 
