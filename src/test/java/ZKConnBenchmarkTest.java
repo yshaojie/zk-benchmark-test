@@ -6,11 +6,11 @@ import com.self.ZKConnBenchmark;
  */
 public class ZKConnBenchmarkTest {
     public static void main(String[] args) throws Exception {
-        ZKConnBenchmark zkConnBenchmark = new ZKConnBenchmark("10.10.20.50:2181");
-        zkConnBenchmark.connections(500);
+        ZKConnBenchmark zkConnBenchmark = new ZKConnBenchmark("192.168.8.18:2181");
+        zkConnBenchmark.connections(5);
         zkConnBenchmark.setDataAndGet(512, 3);
         System.out.println("work end");
-        zkConnBenchmark.watch(1,5*1000L);
+//        zkConnBenchmark.watch(1,5*1000L);
         Thread.sleep(10000000L);
     }
 }

@@ -9,9 +9,7 @@ import org.apache.curator.retry.RetryNTimes;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.data.Stat;
 
-import javax.sound.midi.Soundbank;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -22,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class ZKConnBenchmark {
     //缓存连接
-    private List<CuratorFramework> connections = null;
+    private List<CuratorFramework> connections = new ArrayList<CuratorFramework>();
 
     private String zkString = null;
 
@@ -30,31 +28,51 @@ public class ZKConnBenchmark {
         this.zkString = zkString;
     }
 
-    private CuratorFramework createCuratorFrameworkConn() {
+    /**
+     * 创建连接
+     * @return
+     */
+    public boolean createConn(){
         CuratorFramework client = CuratorFrameworkFactory.builder()
-                                    .namespace("zktest")
-                                    .connectString(zkString)
-                                    .retryPolicy(new RetryNTimes(2, 1000))
-                                    .build();
+                .namespace("zktest")
+                .connectString(zkString)
+                .retryPolicy(new RetryNTimes(2, 1000))
+                .build();
         client.start();
-        return client;
+        connections.add(client);
+        return true;
     }
+
+    public String getData(String path) throws Exception {
+        if (connections.size() <1) {
+            throw new IllegalStateException("no connection");
+        }
+        final CuratorFramework connection = connections.get(0);
+        final byte[] bytes = connection.getData().forPath(path);
+        return new String(bytes);
+    }
+
+    public boolean setData(String path,int dataLen) throws Exception {
+        if (connections.size() <1) {
+            throw new IllegalStateException("no connection");
+        }
+        final CuratorFramework connection = connections.get(0);
+        final Stat stat = connection.setData().forPath(path, createData(dataLen));
+        return stat!=null;
+    }
+
 
     public final void connections(int count){
         if (count<1) {
             throw new IllegalArgumentException("count="+count+" param error.");
         }
-        connections = new ArrayList(count);
         long start = System.currentTimeMillis();
         for (int i = 1; i <= count; i++) {
-            final CuratorFramework curatorFrameworkConn = createCuratorFrameworkConn();
-            if (curatorFrameworkConn.getState() != CuratorFrameworkState.STARTED) {
+            final boolean conn = createConn();
+            if (!conn) {
                 System.out.println("i="+i+" connection fail.");
-            }else {
-//                System.out.println("i="+i+" success.");
-                connections.add(curatorFrameworkConn);
             }
-            if (i%500==0) {
+            if (i % 500 == 0) {
                 System.out.println("connections count="+i);
             }
         }
