@@ -1,17 +1,16 @@
 package com.self;
 
-import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.framework.api.CuratorWatcher;
-import org.apache.curator.framework.imps.CuratorFrameworkState;
-import org.apache.curator.retry.RetryNTimes;
+import org.apache.curator.retry.RetryOneTime;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.data.Stat;
 
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  *
@@ -23,24 +22,38 @@ public class ZKConnBenchmark {
     private List<CuratorFramework> connections = new ArrayList<CuratorFramework>();
 
     private String zkString = null;
-
-    public ZKConnBenchmark(String zkString) {
+    private ExecutorService executor;
+    private int threads;
+    public ZKConnBenchmark(String zkString,int threads) {
+        executor = new ThreadPoolExecutor(3, threads,
+                1, TimeUnit.DAYS, new ArrayBlockingQueue<Runnable>(
+                10000), Executors.defaultThreadFactory(),
+                new ThreadPoolExecutor.CallerRunsPolicy());
         this.zkString = zkString;
+        this.threads = threads;
     }
 
     /**
      * 创建连接
      * @return
      */
-    public boolean createConn(){
+    public boolean createConn() {
+        boolean success = true;
         CuratorFramework client = CuratorFrameworkFactory.builder()
                 .namespace("zktest")
                 .connectString(zkString)
-                .retryPolicy(new RetryNTimes(2, 1000))
+                .connectionTimeoutMs(1000)
+                .retryPolicy(new RetryOneTime( 1000))
                 .build();
         client.start();
+        try {
+            client.blockUntilConnected();
+        } catch (InterruptedException e) {
+            success = false;
+            e.printStackTrace();
+        }
         connections.add(client);
-        return true;
+        return success;
     }
 
     public String getData(String path) throws Exception {
@@ -52,13 +65,54 @@ public class ZKConnBenchmark {
         return new String(bytes);
     }
 
-    public boolean setData(String path,int dataLen) throws Exception {
+    public void setData(int dataLen, final int count) throws Exception {
+        final AtomicInteger inde = new AtomicInteger();
+        final AtomicInteger counter = new AtomicInteger();
+        final AtomicInteger fail = new AtomicInteger();
+        final AtomicLong cost = new AtomicLong();
+        final byte[] data = createData(dataLen);
+        System.out.println("init test env...");
+        connections(threads);
+
+
         if (connections.size() <1) {
             throw new IllegalStateException("no connection");
         }
-        final CuratorFramework connection = connections.get(0);
-        final Stat stat = connection.setData().forPath(path, createData(dataLen));
-        return stat!=null;
+        final CountDownLatch countDownLatch = new CountDownLatch(1);
+        System.out.println("init env success..");
+        System.out.println("start setdata test threads="+threads+" count="+count+" data="+dataLen+"KB");
+        for (int i = 0; i < count; i++) {
+            executor.submit(new Runnable() {
+                public void run() {
+                    final int index = inde.incrementAndGet() % threads;
+                    final CuratorFramework curatorFramework = connections.get(index);
+                    try {
+                        long start = System.currentTimeMillis();
+                        final Stat stat = curatorFramework.setData().forPath("/node" + index, data);
+                        long costTime = System.currentTimeMillis() - start;
+                        cost.addAndGet(costTime);
+                        if (stat == null) {
+                            fail.incrementAndGet();
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        fail.incrementAndGet();
+                    }finally {
+                        final int i1 = counter.incrementAndGet();
+                        if (i1%1000==0) {
+                            System.out.println("proccess success count = "+i1);
+                        }
+                        if (i1 == count) {
+                            countDownLatch.countDown();
+                        }
+                    }
+                }
+            });
+        }
+
+        countDownLatch.await();
+        System.out.println("end setdata test average time="+(cost.longValue()/count)+" fail="+fail.intValue());
+
     }
 
 
@@ -72,8 +126,8 @@ public class ZKConnBenchmark {
             if (!conn) {
                 System.out.println("i="+i+" connection fail.");
             }
-            if (i % 500 == 0) {
-                System.out.println("connections count="+i);
+            if (i % 100 == 0) {
+                System.out.println("connections count="+i+" cost time="+(System.currentTimeMillis()-start));
             }
         }
         long end = System.currentTimeMillis();
