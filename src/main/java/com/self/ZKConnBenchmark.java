@@ -25,7 +25,7 @@ public class ZKConnBenchmark {
     private ExecutorService executor;
     private int threads;
     public ZKConnBenchmark(String zkString,int threads) {
-        executor = new ThreadPoolExecutor(3, threads,
+        executor = new ThreadPoolExecutor(1, threads,
                 1, TimeUnit.DAYS, new ArrayBlockingQueue<Runnable>(
                 10000), Executors.defaultThreadFactory(),
                 new ThreadPoolExecutor.CallerRunsPolicy());
@@ -56,13 +56,55 @@ public class ZKConnBenchmark {
         return success;
     }
 
-    public String getData(String path) throws Exception {
+    public void getData(int dataLen, final int count) throws Exception {
+        final AtomicInteger inde = new AtomicInteger();
+        final AtomicInteger counter = new AtomicInteger();
+        final AtomicInteger fail = new AtomicInteger();
+        final AtomicLong cost = new AtomicLong();
+        final byte[] data = createData(dataLen);
+        System.out.println("init test env...");
+        connections(threads);
         if (connections.size() <1) {
             throw new IllegalStateException("no connection");
         }
-        final CuratorFramework connection = connections.get(0);
-        final byte[] bytes = connection.getData().forPath(path);
-        return new String(bytes);
+        for (int i = 0; i < threads; i++) {
+            connections.get(0).setData().forPath("/node"+i,data);
+        }
+
+        final CountDownLatch countDownLatch = new CountDownLatch(1);
+        System.out.println("init env success..");
+        System.out.println("start getdata test threads="+threads+" count="+count+" data="+dataLen+"KB");
+        for (int i = 0; i < count; i++) {
+            executor.submit(new Runnable() {
+                public void run() {
+                    final int index = inde.incrementAndGet() % threads;
+                    final CuratorFramework curatorFramework = connections.get(index);
+                    try {
+                        long start = System.currentTimeMillis();
+                        final byte[] data = curatorFramework.getData().forPath("/node" + index);
+                        long costTime = System.currentTimeMillis() - start;
+                        cost.addAndGet(costTime);
+                        if (data == null) {
+                            fail.incrementAndGet();
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        fail.incrementAndGet();
+                    }finally {
+                        final int i1 = counter.incrementAndGet();
+                        if (i1%1000==0) {
+                            System.out.println("proccess success count = "+i1);
+                        }
+                        if (i1 == count) {
+                            countDownLatch.countDown();
+                        }
+                    }
+                }
+            });
+        }
+
+        countDownLatch.await();
+        System.out.println("end getdata test average time="+(cost.longValue()/count)+" fail="+fail.intValue());
     }
 
     public void setData(int dataLen, final int count) throws Exception {
@@ -143,44 +185,30 @@ public class ZKConnBenchmark {
         return data;
     }
 
-    public void watch(int dataLen,long sleepms) throws Exception {
+    public void watch(int dataLen,int conns,int count) throws Exception {
         String path = "/node1";
         final List<Long> tims = new CopyOnWriteArrayList<Long>();
         System.out.println("start init zk watch....");
-        System.out.println("need init zk conn count=" + connections.size());
+        System.out.println("need init zk conn count=" + conns);
+        connections(conns);
+
         for (int i = 1; i <= 1; i++) {
             path="/node"+i;
             doWatch(path, tims);
         }
+        System.out.println("init zk watch end,watch node count="+connections.size());
 
-        System.out.println("start zk watch end....");
-
+        Thread.sleep(2000L);
         //设置数据
-        String data = System.currentTimeMillis()+new String(createData(dataLen));
+        String data = System.currentTimeMillis()+"";
         connections.get(0).setData().forPath(path, data.getBytes());
-        Thread.sleep(sleepms);
-        List<Long> ss = new ArrayList<Long>(tims.size());
-        long all = 0;
-        for (Long s : tims) {
-            all = all + s;
-            ss.add(s);
-        }
-        System.out.println("get wath in " + sleepms + "ms count=" + tims.size()+"  average time="+(all/tims.size()));
-        System.out.println("wath test end.............");
-//        Collections.sort(ss, new Comparator<Long>() {
-//            public int compare(Long o1, Long o2) {
-//                return (int) (o2.longValue() - o1.longValue());
-//            }
-//        });
-//        for (Long tim : ss) {
-//            System.out.println(tim);
-//        }
-
+        System.out.println("set data success, dataLen="+dataLen);
     }
 
-    private void doWatch(String path, final List<Long> tims) throws Exception {
+    private void doWatch(final String path, final List<Long> tims) throws Exception {
         System.out.println("start watch path="+path);
         final AtomicInteger counter = new AtomicInteger();
+        final AtomicLong costTime = new AtomicLong();
         //初始化监听
         for (final CuratorFramework connection : connections) {
             connection.getData().usingWatcher(new CuratorWatcher() {
@@ -190,10 +218,14 @@ public class ZKConnBenchmark {
                             long current = System.currentTimeMillis();
                             final byte[] bytes;
                             try {
-                                bytes = connection.getData().forPath(watchedEvent.getPath());
+                                bytes = connection.getData().forPath(path);
                                 long setTime = Long.valueOf(new String(bytes).substring(0,13)) ;
                                 final long ts = current - setTime;
-//                                long ts = 0;
+                                final long cost = costTime.addAndGet(ts);
+                                final int count = counter.incrementAndGet();
+                                if (count%100==0) {
+                                    System.out.println(" count="+count+" average cost time="+(cost/count));
+                                }
                                 tims.add(ts);
                             } catch (Exception e) {
                                 e.printStackTrace();
@@ -205,6 +237,8 @@ public class ZKConnBenchmark {
                 }
             }).forPath(path);
         }
+        System.out.println("success watch path="+path);
+
     }
 
 

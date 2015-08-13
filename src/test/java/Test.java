@@ -15,9 +15,12 @@ public class Test {
                 .retryPolicy(new RetryOneTime( 1000))
                 .build();
         client.start();
-        for (int i = 0; i < 1; i++) {
+        for (int i = 0; i < 10000; i++) {
             String path = "/node"+i;
-            client.create().forPath(path);
+            if (client.checkExists().forPath(path)==null) {
+
+                client.create().forPath(path);
+            }
         }
     }
 }
